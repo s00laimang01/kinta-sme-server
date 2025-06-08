@@ -1,59 +1,48 @@
+// middleware.js
 import { NextRequest, NextResponse } from "next/server";
 
 const allowedOrigins = [
-  "http://localhost:3001",
-  "http://localhost:3000",
-  "capacitor://localhost",
-  "http://localhost",
-  "file://",
-]; // caution: optional];
+  "file://", // Capacitor WebView
+  "capacitor://localhost", // Capacitor scheme
+  "http://localhost", // Local dev
+  "http://localhost:3000", // Next.js dev
+  "http://localhost:3001", // Additional local port
+  "https://kinta-sme-app.com", // Your hosted app
+  // Add your local IP for live reload, e.g., 'http://192.168.x.x:3000'
+];
 
 const corsOptions = {
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Credentials": "true",
 };
 
 export function middleware(request: NextRequest) {
-  // Check the origin from the request
+  // Get the origin from the request
   const origin = request.headers.get("origin") ?? "";
-  const isAllowedOrigin = allowedOrigins.includes(origin);
+  const isAllowedOrigin = allowedOrigins.includes(origin) || origin === ""; // Handle null/empty origins
 
-  // Handle preflighted requests
-  const isPreflight = request.method === "OPTIONS";
-
-  if (isPreflight) {
+  // Handle preflight OPTIONS requests
+  if (request.method === "OPTIONS") {
     const preflightHeaders = {
-      ...(isAllowedOrigin && {
-        "Access-Control-Allow-Origin": origin,
-        "Access-Control-Allow-Credentials": "true",
-        "Access-Control-Allow-Methods":
-          "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      }),
+      "Access-Control-Allow-Origin": isAllowedOrigin ? origin || "*" : "",
       ...corsOptions,
     };
-    return NextResponse.json({}, { headers: preflightHeaders });
+    return new NextResponse(null, {
+      status: 204, // Standard for preflight
+      headers: preflightHeaders,
+    });
   }
 
   // Handle simple requests
   const response = NextResponse.next();
 
   if (isAllowedOrigin) {
-    response.headers.set("Access-Control-Allow-Origin", origin);
-    response.headers.set("Access-Control-Allow-Credentials", "true");
-    response.headers.set(
-      "Access-Control-Allow-Methods",
-      "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-    );
-    response.headers.set(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization"
-    );
+    response.headers.set("Access-Control-Allow-Origin", origin || "*");
+    Object.entries(corsOptions).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
   }
-
-  Object.entries(corsOptions).forEach(([key, value]) => {
-    response.headers.set(key, value);
-  });
 
   return response;
 }
