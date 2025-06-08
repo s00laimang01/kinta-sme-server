@@ -8,6 +8,7 @@ const allowedOrigins = [
   "http://localhost:3000", // Next.js dev
   "http://localhost:3001", // Additional local port
   "https://kinta-sme-app.com", // Your hosted app
+  "https://kinta-sme-app.vercel.app/",
   // Add your local IP for live reload, e.g., 'http://192.168.x.x:3000'
 ];
 
