@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     // Create response
     const response = NextResponse.json(
-      httpStatusResponse(200, "Login successful", { user: userPayload }),
+      httpStatusResponse(200, "Login successful", { user: userPayload, token }),
       { status: 200 }
     );
 

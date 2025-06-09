@@ -37,8 +37,8 @@ export const setTokenCookie = (response: NextResponse, token: string) => {
     name: "token",
     value: token,
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    secure: false,
+    //sameSite: "strict",
     maxAge: JWT_EXPIRATION,
     path: "/",
   });
