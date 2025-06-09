@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { IUser, IUserRole } from "@/types";
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 export interface JWTPayload {
   id: string;
@@ -49,7 +49,8 @@ export const setTokenCookie = (response: NextResponse, token: string) => {
 // Get JWT token from cookies in API route
 export const getTokenFromCookies = async () => {
   const cookieStore = await cookies();
-  return cookieStore.get("token")?.value;
+  const _headerStore = await headers();
+  return _headerStore.get("Authorization") || cookieStore.get("token")?.value;
 };
 
 // Clear JWT token cookie
