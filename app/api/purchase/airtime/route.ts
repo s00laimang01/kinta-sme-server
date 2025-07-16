@@ -6,6 +6,7 @@ import { httpStatusResponse } from "@/lib/utils";
 import { airtimeRequestSchema } from "@/lib/validator.schema";
 import { connectToDatabase } from "@/lib/connect-to-db";
 import { BuyVTU } from "@/lib/server-utils";
+import { getTokenFromCookies, getUserFromToken } from "@/lib/jwt";
 
 export async function POST(request: Request) {
   const body = await request.json(); //Get the body of our request of the client
@@ -44,16 +45,17 @@ export async function POST(request: Request) {
     } = validationResult.data;
 
     // Get user session
-    const authSession = await getServerSession();
+    const token = await getTokenFromCookies();
 
-    //If the user is not authenticated
-    if (!authSession?.user?.email) {
+    // Get user from token
+    const authenticatedUser = await getUserFromToken(token);
+
+    if (!authenticatedUser) {
       return NextResponse.json(
-        httpStatusResponse(401, "Unauthorized: Please login"),
+        httpStatusResponse(401, "UNAUTHENTICATED: Please sign in to continue."),
         { status: 401 }
       );
     }
-
     // Connect to database BEFORE starting the session
     await connectToDatabase();
 
@@ -86,7 +88,7 @@ export async function POST(request: Request) {
 
     // Find user and verify transaction pin and balance
     const user = await User.findOne({
-      "auth.email": authSession.user.email,
+      "auth.email": authenticatedUser.email,
     })
       .select("+auth.transactionPin")
       .session(buyVtu.session);

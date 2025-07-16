@@ -9,6 +9,7 @@ import { App } from "@/models/app";
 import { connectToDatabase } from "@/lib/connect-to-db";
 import { BuyVTU } from "@/lib/server-utils";
 import { IBuyVtuNetworks } from "@/types";
+import { getTokenFromCookies, getUserFromToken } from "@/lib/jwt";
 
 export async function POST(request: Request) {
   const buyVtu = new BuyVTU();
@@ -37,10 +38,15 @@ export async function POST(request: Request) {
     } = validationResult.data;
 
     // Get the email of the current authenticated user
-    const serverSession = await getServerSession();
-    if (!serverSession?.user?.email) {
-      throw new Error(
-        "UNAUTHORIZED_REQUEST: Please login before you continue."
+    const token = await getTokenFromCookies();
+
+    // Get user from token
+    const authenticatedUser = await getUserFromToken(token);
+
+    if (!authenticatedUser) {
+      return NextResponse.json(
+        httpStatusResponse(401, "UNAUTHENTICATED: Please sign in to continue."),
+        { status: 401 }
       );
     }
 
@@ -57,7 +63,7 @@ export async function POST(request: Request) {
     await app?.systemIsunderMaintainance();
     await app?.isTransactionEnable("data");
 
-    const userEmail = serverSession.user.email;
+    const userEmail = authenticatedUser.email;
 
     // Find the current user in the db and also the transaction pin
     const user = await User.findOne({ "auth.email": userEmail }).select(
