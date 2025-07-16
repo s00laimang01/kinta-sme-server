@@ -27,6 +27,7 @@ import {
   transactionType,
   IReferral,
   DataVendingResponse,
+  AirtimeVendingResponse,
 } from "@/types";
 import axios from "axios";
 import mongoose, { PipelineStage } from "mongoose";
@@ -39,6 +40,7 @@ import { addToRecentlyUsedContact } from "@/models/recently-used-contact";
 import { createTransport } from "nodemailer";
 import SMTPTransport from "nodemailer/lib/smtp-transport";
 import { Referral } from "@/models/referral";
+import { number } from "zod";
 
 export const budPay = (type: "s2s" | "v2" = "v2") => {
   return axios.create({
@@ -724,6 +726,57 @@ export class BuyVTU {
     }
   }
 
+  public async buyAirtimeFromA4bData(payload: {
+    network: string;
+    phone: string;
+    amount: number;
+    "request-id": string;
+    bypass?: boolean;
+  }) {
+    try {
+      const { data, status } = await axios.post<AirtimeVendingResponse>(
+        `https://a4bdata.com/api/topup/`,
+        { ...payload, plan_type: "VTU" },
+        {
+          headers: {
+            Authorization: `Token ${process.env.A4BDATA_ACCESS_TOKEN}`,
+          },
+        }
+      );
+
+      this.vendingResponse = {
+        commissionEarned: data.discount,
+        cost: data.amount,
+        recipientCount: 1,
+        recipients: data.phone_number,
+        totalAmount: data.amount,
+        vendReport: {
+          [data.phone_number]: "successful",
+        },
+        vendStatus: null,
+      };
+      this.status = Boolean(
+        status === 200 &&
+          this.vendingResponse.vendReport?.[data.phone_number] === "successful"
+      );
+      this.message = !this.status
+        ? "Airtime vending failed"
+        : "Airtime purchase successful, you will be creditted soon";
+
+      return this;
+    } catch (error: any) {
+      console.log(error.response);
+
+      this.status = false;
+
+      this.message =
+        //@ts-ignore
+        error.response?.data?.data?.errorDesc ||
+        "AIRTIME_PURCHASE_FAILED: unable to process your request.";
+      return this;
+    }
+  }
+
   public async validateMeterNo(discoId: string, meterNo: string) {
     try {
       if (!this.accessToken) {
@@ -801,6 +854,8 @@ export class BuyVTU {
         throw new Error("Session not started. Call startSession first.");
       }
 
+      if (!this.status) return;
+
       const meta = {
         ...this.vendingResponse,
         ...this.powerVendResponse,
@@ -814,7 +869,7 @@ export class BuyVTU {
           0,
         paymentMethod: "ownAccount",
         accountId:
-          this.vendingResponse?.recipients ??
+          this.vendingResponse?.recipients ||
           this.powerVendResponse?.recipients,
         status: this.status ? "success" : "failed",
         tx_ref: this.ref,
@@ -872,7 +927,7 @@ export class BuyVTU {
     networkId: number,
     planId: number,
     phoneNumber: string,
-    amount = 0
+    amount: number
   ) {
     try {
       interface IRes {
@@ -896,8 +951,6 @@ export class BuyVTU {
         payload,
         { headers: { Authorization: `Bearer ${process.env.SME_PLUG_API_KEY}` } }
       );
-
-      console.log({ res });
 
       this.vendingResponse = {
         recipientCount: 1,
@@ -932,7 +985,8 @@ export class BuyVTU {
   public async buyDataFromA4BData(
     network: string,
     data_plan: string,
-    phoneNumber: string
+    phoneNumber: string,
+    bypass: boolean = false
   ) {
     try {
       const payload = {
@@ -940,7 +994,10 @@ export class BuyVTU {
         data_plan,
         phone: phoneNumber,
         "request-id": this.ref,
+        bypass,
       };
+
+      console.log({ payload });
 
       const res = await axios.post<DataVendingResponse>(
         `https://a4bdata.com/api/data`,
@@ -969,11 +1026,13 @@ export class BuyVTU {
         res.data.status &&
           this.vendingResponse.vendReport[phoneNumber] === "successful"
       );
-      this.message = !this.status ? "Data vending failed" : res.data.message;
+      this.message = !this.status
+        ? "Data vending failed"
+        : `Your data purchase was successful and you will credited shortly`;
 
       return this;
-    } catch (error) {
-      console.error("Data purchase error:");
+    } catch (error: any) {
+      console.error(error.response.data);
       this.status = false;
       this.message =
         error instanceof Error && error.message

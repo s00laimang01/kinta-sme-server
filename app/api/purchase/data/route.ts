@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
 import { z } from "zod";
-import { checkIfUserIsAuthenticated, httpStatusResponse } from "@/lib/utils";
+import { httpStatusResponse } from "@/lib/utils";
 import { User } from "@/models/users";
 import { DataPlan } from "@/models/data-plan";
 import { dataRequestSchema } from "@/lib/validator.schema";
 import { App } from "@/models/app";
 import { connectToDatabase } from "@/lib/connect-to-db";
 import { BuyVTU } from "@/lib/server-utils";
-import { JWTPayload } from "@/lib/jwt";
+import { IBuyVtuNetworks } from "@/types";
 
 export async function POST(request: Request) {
   const buyVtu = new BuyVTU();
@@ -36,8 +37,8 @@ export async function POST(request: Request) {
     } = validationResult.data;
 
     // Get the email of the current authenticated user
-    const serverSession = (await checkIfUserIsAuthenticated()) as JWTPayload;
-    if (!serverSession?.email) {
+    const serverSession = await getServerSession();
+    if (!serverSession?.user?.email) {
       throw new Error(
         "UNAUTHORIZED_REQUEST: Please login before you continue."
       );
@@ -56,14 +57,12 @@ export async function POST(request: Request) {
     await app?.systemIsunderMaintainance();
     await app?.isTransactionEnable("data");
 
-    const userEmail = serverSession.email;
+    const userEmail = serverSession.user.email;
 
     // Find the current user in the db and also the transaction pin
     const user = await User.findOne({ "auth.email": userEmail }).select(
       "+auth.transactionPin"
     );
-
-    console.log({ user });
 
     if (!user) {
       throw new Error("USER_NOT_FOUND: please contact admin");
@@ -88,78 +87,46 @@ export async function POST(request: Request) {
     //TODO: check network
     buyVtu.setNetwork = dataPlan.network;
 
-    // Only debit user and create transaction if data purchase was successful
     // Update user balance with session
     await user.updateOne(
       { $inc: { balance: -dataPlan.amount } },
       { session: buyVtu.session }
     );
 
-    // Try to purchase data from different providers
-    let dataPurchaseSuccess = false;
-    let purchaseError: Error | null = null;
+    if (dataPlan.network === "Mtn" || dataPlan.provider === "smePlug") {
+      //use abanty data sme
+      const n: Record<string, any> = {
+        mtn: "1",
+        airtel: "2",
+        "9mobile": "3",
+        glo: "4",
+      };
 
-    if (dataPlan.planId === 1000) {
-      const alternatesSMEPlans = ["32", "1"];
-      const MAX_RETRY = 2;
-      let retry = 0;
+      await buyVtu.buyDataFromSMEPLUG(
+        n[dataPlan.network.toLowerCase()],
+        dataPlan.planId,
+        phoneNumber,
+        dataPlan.amount
+      );
+    }
 
-      while (retry < MAX_RETRY && !dataPurchaseSuccess) {
-        try {
-          if (retry === 0) {
-            await buyVtu.buyData(alternatesSMEPlans[0] as string, phoneNumber);
-          } else if (retry === 1) {
-            await buyVtu.buyDataFromA4BData("1", "1", phoneNumber);
-          }
+    if (dataPlan.network !== "Mtn" || dataPlan.provider === "buyVTU") {
+      const networdId: Record<IBuyVtuNetworks, string> = {
+        Mtn: "1",
+        Airtel: "2",
+        Glo: "3",
+        "9Mobile": "4",
+      };
 
-          if (buyVtu.status) {
-            dataPurchaseSuccess = true;
-            break;
-          }
-
-          retry++;
-        } catch (error) {
-          purchaseError =
-            error instanceof Error ? error : new Error("Unknown error");
-          retry++;
-        }
-      }
-    } else {
-      try {
-        // Buy data
-        if (dataPlan.provider === "smePlug") {
-          const n: Record<string, any> = {
-            mtn: "1",
-            airtel: "2",
-            "9mobile": "3",
-            glo: "4",
-          };
-
-          await buyVtu.buyDataFromSMEPLUG(
-            n[dataPlan.network.toLowerCase()],
-            dataPlan.planId,
-            phoneNumber,
-            dataPlan.amount
-          );
-        } else {
-          await buyVtu.buyData(dataPlan.planId + "", phoneNumber);
-        }
-
-        dataPurchaseSuccess = buyVtu.status;
-      } catch (error) {
-        purchaseError =
-          error instanceof Error ? error : new Error("Unknown error");
-      }
+      await buyVtu.buyDataFromA4BData(
+        networdId[dataPlan.network],
+        String(dataPlan.planId),
+        phoneNumber,
+        byPassValidator
+      );
     }
 
     buyVtu.amount = dataPlan?.amount;
-
-    // Check if data purchase was successful
-    if (!dataPurchaseSuccess || !buyVtu.status) {
-      throw new Error(
-        buyVtu.message || purchaseError?.message || "Failed to purchase data"
-      );
-    }
 
     // Create transaction record
     await buyVtu.createTransaction("data", user.id);

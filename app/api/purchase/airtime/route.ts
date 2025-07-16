@@ -1,11 +1,11 @@
 import { App } from "@/models/app";
 import { User } from "@/models/users";
+import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { checkIfUserIsAuthenticated, httpStatusResponse } from "@/lib/utils";
+import { httpStatusResponse } from "@/lib/utils";
 import { airtimeRequestSchema } from "@/lib/validator.schema";
 import { connectToDatabase } from "@/lib/connect-to-db";
 import { BuyVTU } from "@/lib/server-utils";
-import { JWTPayload } from "@/lib/jwt";
 
 export async function POST(request: Request) {
   const body = await request.json(); //Get the body of our request of the client
@@ -35,10 +35,24 @@ export async function POST(request: Request) {
     }
 
     //Get the data from the successfully parse data
-    const { pin, amount, network, phoneNumber } = validationResult.data;
+    const {
+      pin,
+      amount,
+      network,
+      phoneNumber,
+      byPassValidator = false,
+    } = validationResult.data;
 
     // Get user session
-    const authSession = (await checkIfUserIsAuthenticated()) as JWTPayload;
+    const authSession = await getServerSession();
+
+    //If the user is not authenticated
+    if (!authSession?.user?.email) {
+      return NextResponse.json(
+        httpStatusResponse(401, "Unauthorized: Please login"),
+        { status: 401 }
+      );
+    }
 
     // Connect to database BEFORE starting the session
     await connectToDatabase();
@@ -63,9 +77,16 @@ export async function POST(request: Request) {
 
     await app?.checkTransactionLimit(amount); //Check the transaction limit to see if the user request pass that amount.
 
+    const ntwks: Record<string, number> = {
+      Mtn: 1,
+      Airtel: 2,
+      Glo: 3,
+      "9Mobile": 4,
+    };
+
     // Find user and verify transaction pin and balance
     const user = await User.findOne({
-      "auth.email": authSession.email,
+      "auth.email": authSession.user.email,
     })
       .select("+auth.transactionPin")
       .session(buyVtu.session);
@@ -81,18 +102,20 @@ export async function POST(request: Request) {
 
     await user.verifyUserBalance(amount); //Check if the user have the balance to buy the service.
 
-    //Use this util function to purchase airtime
-    //const res = await buyAirtime(
-    //  networkTypes[network],
-    //  phoneNumber,
-    //  amount,
-    //  tx_ref,
-    //  byPassValidator,
-    //  "VTU"
-    //);
+    // Update user balance with session
+    await user.updateOne(
+      { $inc: { balance: -amount } },
+      { session: buyVtu.session }
+    );
 
     //Use the buyAirtime function to purchase airtime.
-    await buyVtu.buyAirtime(phoneNumber, amount);
+    await buyVtu.buyAirtimeFromA4bData({
+      amount,
+      bypass: byPassValidator,
+      network: String(ntwks[network]),
+      phone: phoneNumber,
+      "request-id": buyVtu.ref,
+    });
 
     //If the service purchase is not successfull throw and error
     if (!buyVtu.status) {
@@ -101,12 +124,6 @@ export async function POST(request: Request) {
 
     // Create transaction record
     await buyVtu.createTransaction("airtime", user.id);
-
-    // Update user balance with session
-    await user.updateOne(
-      { $inc: { balance: -amount } },
-      { session: buyVtu.session }
-    );
 
     // Commit the transaction if everything succeeded
     await buyVtu.commitSession();
