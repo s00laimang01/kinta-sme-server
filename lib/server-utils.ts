@@ -971,8 +971,8 @@ export class BuyVTU {
       this.message = !this.status ? "Data vending failed" : res.data.data.msg;
 
       return this;
-    } catch (error) {
-      console.error("Data purchase error:");
+    } catch (error: any) {
+      console.error(error.response);
       this.status = false;
       this.message =
         error instanceof Error && error.message

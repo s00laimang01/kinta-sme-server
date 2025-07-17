@@ -40,6 +40,8 @@ export async function POST(request: Request) {
     // Get the email of the current authenticated user
     const token = await getTokenFromCookies();
 
+    console.log(token);
+
     // Get user from token
     const authenticatedUser = await getUserFromToken(token);
 
@@ -155,8 +157,6 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("Data purchase error:", error);
-
     // If transaction hasn't been committed and we have an active session, abort it
     if (!isTransactionCommitted && buyVtu.session) {
       try {
