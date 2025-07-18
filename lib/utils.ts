@@ -173,8 +173,11 @@ export const httpStatusResponse = (
 };
 
 import { getTokenFromCookies, getUserFromToken } from "./jwt";
+import { connectToDatabase } from "./connect-to-db";
 
 export const checkIfUserIsAuthenticated = async (adminAccess = false) => {
+  await connectToDatabase();
+
   const token = await getTokenFromCookies();
   const user = await getUserFromToken(token);
 

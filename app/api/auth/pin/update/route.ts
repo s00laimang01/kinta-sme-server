@@ -23,7 +23,9 @@ export async function PATCH(request: Request) {
 
     const { email } = (await checkIfUserIsAuthenticated()) as JWTPayload;
 
-    const user = await User.findOne({ "auth.email": email });
+    const user = await User.findOne({ "auth.email": email }).select(
+      "+auth.transactionPin"
+    );
 
     if (!user) {
       return NextResponse.json(httpStatusResponse(404, "User not found"), {
