@@ -1,4 +1,3 @@
-import { connectToDatabase } from "@/lib/connect-to-db";
 import { configs } from "@/lib/constants";
 import { JWTPayload } from "@/lib/jwt";
 import { sendEmail } from "@/lib/server-utils";
@@ -107,6 +106,15 @@ export async function POST(request: Request) {
 export async function GET(request: NextRequest) {
   try {
     const q = request.nextUrl.searchParams;
+
+    const session = await checkIfUserIsAuthenticated();
+
+    if (!session) {
+      return NextResponse.json(
+        httpStatusResponse(401, "UNAUTHORIZED: User not authenticated"),
+        { status: 401 }
+      );
+    }
 
     const otp = await OTP.findOne({ otp: q.get("otp") });
 
