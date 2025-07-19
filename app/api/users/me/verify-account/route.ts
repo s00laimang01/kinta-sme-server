@@ -9,7 +9,6 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   try {
-    console.log(process.env.RESEND_API_KEY);
     const { type = "email" } = await request.json();
 
     const session = (await checkIfUserIsAuthenticated()) as JWTPayload;
@@ -23,8 +22,6 @@ export async function POST(request: Request) {
         { status: 409 }
       );
     }
-
-    await connectToDatabase();
 
     const user = await User.findOne({ "auth.email": session?.email });
 
