@@ -60,7 +60,7 @@ export async function POST(req: Request) {
     await PasswordResetToken.deleteOne({ email });
 
     return NextResponse.json(
-      { message: "Password reset successful" },
+      { message: "Password reset successfully" },
       { status: 200 }
     );
   } catch (error) {

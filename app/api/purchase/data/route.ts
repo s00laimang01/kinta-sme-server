@@ -40,8 +40,6 @@ export async function POST(request: Request) {
     // Get the email of the current authenticated user
     const token = await getTokenFromCookies();
 
-    console.log(token);
-
     // Get user from token
     const authenticatedUser = await getUserFromToken(token);
 
