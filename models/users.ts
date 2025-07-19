@@ -116,12 +116,12 @@ UserSchema.pre("save", async function (next) {
   }
 
   // This will only run if this is the first time the user is creating their account.
-  if (this.isNew) {
-    // Check if user does not need to verify their account before assigning an account to them
-    if (!(await accountRequiresVerificationBeforeVirtualAccountActivation())) {
-      await processVirtualAccountForUser(this);
-    }
-  }
+  //if (this.isNew) {
+  //  // Check if user does not need to verify their account before assigning an account to them
+  //  if (!(await accountRequiresVerificationBeforeVirtualAccountActivation())) {
+  //    await processVirtualAccountForUser(this);
+  //  }
+  //}
 
   // Hash password if modified
   if (this.isModified("auth.password")) {
