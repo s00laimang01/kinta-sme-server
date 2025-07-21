@@ -1,9 +1,11 @@
-import { httpStatusResponse } from "@/lib/utils";
+import { checkIfUserIsAuthenticated, httpStatusResponse } from "@/lib/utils";
 import { Transaction } from "@/models/transactions";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   try {
+    await checkIfUserIsAuthenticated();
+
     const q = request.nextUrl.searchParams;
     const tx_ref = q.get("tx_ref");
     const useExpirationDate = q.get("useExpirationDate") || true;
