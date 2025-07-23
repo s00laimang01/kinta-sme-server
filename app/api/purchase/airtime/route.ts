@@ -2,7 +2,7 @@ import { App } from "@/models/app";
 import { User } from "@/models/users";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { httpStatusResponse } from "@/lib/utils";
+import { checkIfUserIsAuthenticated, httpStatusResponse } from "@/lib/utils";
 import { airtimeRequestSchema } from "@/lib/validator.schema";
 import { connectToDatabase } from "@/lib/connect-to-db";
 import { BuyVTU } from "@/lib/server-utils";
@@ -44,11 +44,8 @@ export async function POST(request: Request) {
       byPassValidator = false,
     } = validationResult.data;
 
-    // Get user session
-    const token = await getTokenFromCookies();
-
     // Get user from token
-    const authenticatedUser = await getUserFromToken(token);
+    const authenticatedUser = await checkIfUserIsAuthenticated();
 
     if (!authenticatedUser) {
       return NextResponse.json(
