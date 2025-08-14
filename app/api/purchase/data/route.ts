@@ -1,23 +1,31 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
-import { httpStatusResponse } from "@/lib/utils";
+import { checkIfUserIsAuthenticated, httpStatusResponse } from "@/lib/utils";
 import { User } from "@/models/users";
 import { DataPlan } from "@/models/data-plan";
 import { dataRequestSchema } from "@/lib/validator.schema";
 import { App } from "@/models/app";
 import { connectToDatabase } from "@/lib/connect-to-db";
 import { BuyVTU } from "@/lib/server-utils";
-import { IBuyVtuNetworks } from "@/types";
-import { getTokenFromCookies, getUserFromToken } from "@/lib/jwt";
+import { dataPlan, IBuyVtuNetworks } from "@/types";
+import { format } from "date-fns";
+import { Transaction } from "@/models/transactions"; // Add this import
+
+// Add a new schema for idempotency
+const dataRequestSchemaWithIdempotency = dataRequestSchema.extend({
+  idempotencyKey: z.string(),
+});
 
 export async function POST(request: Request) {
   const buyVtu = new BuyVTU();
   let isTransactionCommitted = false;
+  let user: any = null;
+  let dataPlan: dataPlan | null = null;
 
   try {
     const body = await request.json();
-    const validationResult = dataRequestSchema.safeParse(body);
+    const validationResult = dataRequestSchemaWithIdempotency.safeParse(body);
 
     if (!validationResult.success) {
       return NextResponse.json(
@@ -35,38 +43,24 @@ export async function POST(request: Request) {
       _id,
       phoneNumber,
       byPassValidator = false,
+      idempotencyKey,
     } = validationResult.data;
 
     // Get the email of the current authenticated user
-    const token = await getTokenFromCookies();
+    const serverSession = await checkIfUserIsAuthenticated();
 
-    // Get user from token
-    const authenticatedUser = await getUserFromToken(token);
-
-    if (!authenticatedUser) {
-      return NextResponse.json(
-        httpStatusResponse(401, "UNAUTHENTICATED: Please sign in to continue."),
-        { status: 401 }
+    if (!serverSession?.email) {
+      throw new Error(
+        "UNAUTHORIZED_REQUEST: Please login before you continue."
       );
     }
 
     await connectToDatabase();
-    await buyVtu.startSession();
 
-    // Get the entire application configuration
-    const app = await App.findOne({}).select("+buyVtu").session(buyVtu.session);
+    const userEmail = serverSession.email;
 
-    // Refresh/Retrieve the buyVtu accessToken
-    const accessToken = await app?.refreshAccessToken();
-    buyVtu.setAccessToken = accessToken!;
-
-    await app?.systemIsunderMaintainance();
-    await app?.isTransactionEnable("data");
-
-    const userEmail = authenticatedUser.email;
-
-    // Find the current user in the db and also the transaction pin
-    const user = await User.findOne({ "auth.email": userEmail }).select(
+    // Find the current user in the db
+    user = await User.findOne({ "auth.email": userEmail }).select(
       "+auth.transactionPin"
     );
 
@@ -74,15 +68,48 @@ export async function POST(request: Request) {
       throw new Error("USER_NOT_FOUND: please contact admin");
     }
 
+    // Check for existing transaction with same idempotency key (if provided)
+    if (idempotencyKey) {
+      const existingTransaction = await Transaction.findOne({
+        user: user._id,
+        "meta.idempotencyKey": idempotencyKey,
+        type: "data",
+        createdAt: {
+          $gte: new Date(Date.now() - 10 * 60 * 1000), // Within last 10 minutes
+        },
+      });
+
+      if (existingTransaction) {
+        // Return the existing transaction result
+        return NextResponse.json(
+          httpStatusResponse(
+            200,
+            "Transaction already processed",
+            existingTransaction.meta
+          ),
+          { status: 200 }
+        );
+      }
+    }
+
     // Verify the user transaction pin
     await user?.verifyTransactionPin(pin);
 
     // Find data plan
-    const dataPlan = await DataPlan.findById(_id).session(buyVtu.session);
+    dataPlan = await DataPlan.findById(_id);
 
     if (!dataPlan) {
       throw new Error("PLAN_NOT_FOUND: we cannot find this plan");
     }
+
+    // Start session after all validations
+    await buyVtu.startSession();
+
+    // Get the entire application configuration
+    const app = await App.findOne({}).select("+buyVtu").session(buyVtu.session);
+
+    await app?.systemIsunderMaintainance();
+    await app?.isTransactionEnable("data");
 
     // Check the transaction limit
     await app?.checkTransactionLimit(dataPlan.amount);
@@ -90,8 +117,11 @@ export async function POST(request: Request) {
     // Verify user has sufficient balance
     await user.verifyUserBalance(dataPlan.amount);
 
-    //TODO: check network
+    // Set network
     buyVtu.setNetwork = dataPlan.network;
+
+    // Create a unique reference for this transaction
+    const transactionRef = buyVtu.createRequestIdForVtuPass();
 
     // Update user balance with session
     await user.updateOne(
@@ -99,62 +129,94 @@ export async function POST(request: Request) {
       { session: buyVtu.session }
     );
 
-    if (dataPlan.network === "Mtn" || dataPlan.provider === "smePlug") {
-      //use abanty data sme
-      const n: Record<string, any> = {
-        mtn: "1",
-        airtel: "2",
-        "9mobile": "3",
-        glo: "4",
-      };
-
-      await buyVtu.buyDataFromSMEPLUG(
-        n[dataPlan.network.toLowerCase()],
-        dataPlan.planId,
-        phoneNumber,
-        dataPlan.amount
-      );
-    }
-
-    if (dataPlan.network !== "Mtn" || dataPlan.provider === "buyVTU") {
-      const networdId: Record<IBuyVtuNetworks, string> = {
-        Mtn: "1",
-        Airtel: "2",
-        Glo: "3",
-        "9Mobile": "4",
-      };
-
-      await buyVtu.buyDataFromA4BData(
-        networdId[dataPlan.network],
-        String(dataPlan.planId),
-        phoneNumber,
-        byPassValidator
-      );
-    }
-
+    // Create transaction record BEFORE making external API calls
     buyVtu.amount = dataPlan?.amount;
 
-    // Create transaction record
-    await buyVtu.createTransaction("data", user.id);
+    // Pre-create transaction with pending status
+    await buyVtu.createPendingTransaction("data", user.id, {
+      //@ts-ignore
+      ...dataPlan?.toJSON(),
+      payerName: user.fullName,
+      completionTime: format(new Date(), "PPP"),
+      customerPhone: phoneNumber,
+      applicableCountry: "NG",
+      idempotencyKey: idempotencyKey,
+      transactionRef: transactionRef,
+      phoneNumber,
+    });
 
-    // Check if transaction creation was successful
-    if (!buyVtu.status) {
-      throw new Error(buyVtu.message || "Failed to create transaction record");
-    }
-
-    // Commit the transaction (this makes all changes permanent)
+    // Commit the balance deduction and pending transaction
     await buyVtu.commitSession();
     isTransactionCommitted = true;
 
+    // Now make external API calls AFTER committing the transaction
+    let vendingSuccess = false;
+    let vendingMessage = "";
+
+    try {
+      if (dataPlan.network === "Mtn" || dataPlan.provider === "smePlug") {
+        // Use abanty data sme
+        const n: Record<string, any> = {
+          mtn: "1",
+          airtel: "2",
+          "9mobile": "3",
+          glo: "4",
+        };
+
+        await buyVtu.buyDataFromSMEPLUG(
+          n[dataPlan.network.toLowerCase()],
+          dataPlan.planId as number,
+          phoneNumber,
+          dataPlan.amount,
+          transactionRef
+        );
+      } else {
+        const networdId: Record<IBuyVtuNetworks, string> = {
+          Mtn: "1",
+          Airtel: "airtel-data",
+          Glo: "glo-data",
+          "9Mobile": "etisalat-data",
+        };
+
+        await buyVtu.buyDataFromVtuPass({
+          phone: phoneNumber,
+          request_id: transactionRef,
+          serviceID: networdId[dataPlan?.network!] as "airtel-data",
+          variation_code: dataPlan?.planId + "",
+        });
+      }
+
+      vendingSuccess = buyVtu.status;
+      vendingMessage = buyVtu.message || "";
+    } catch (vendingError) {
+      vendingSuccess = false;
+      //vendingMessage =
+      //  vendingError instanceof Error ? vendingError.message : "Vending failed";
+    }
+
+    // Update transaction status based on vending result
+    await buyVtu.updateTransactionStatus(vendingSuccess, vendingMessage);
+
+    console.log({ vendingMessage, vendingSuccess });
+
     return NextResponse.json(
       httpStatusResponse(
-        200,
-        buyVtu.message || "Your data has been purchased successfully",
-        buyVtu.vendingResponse
+        vendingSuccess ? 200 : 400,
+        vendingSuccess
+          ? buyVtu.message || "Your data has been purchased successfully"
+          : vendingMessage ||
+              "Oops, something went wrong while purchasing data for you",
+        {
+          ...buyVtu.vendingResponse,
+          transactionRef: transactionRef,
+          vendingSuccess: vendingSuccess,
+        }
       ),
-      { status: 200 }
+      { status: vendingSuccess ? 200 : 400 }
     );
   } catch (error) {
+    console.error("Data purchase error:", error);
+
     // If transaction hasn't been committed and we have an active session, abort it
     if (!isTransactionCommitted && buyVtu.session) {
       try {

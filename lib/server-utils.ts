@@ -28,6 +28,8 @@ import {
   IReferral,
   DataVendingResponse,
   AirtimeVendingResponse,
+  VtuPassPayResponse,
+  availableNetworks,
 } from "@/types";
 import axios from "axios";
 import mongoose, { PipelineStage } from "mongoose";
@@ -40,13 +42,21 @@ import { addToRecentlyUsedContact } from "@/models/recently-used-contact";
 import { createTransport } from "nodemailer";
 import SMTPTransport from "nodemailer/lib/smtp-transport";
 import { Referral } from "@/models/referral";
-import { number } from "zod";
 
 export const budPay = (type: "s2s" | "v2" = "v2") => {
   return axios.create({
     baseURL: `https://api.budpay.com/api/${type}`,
   });
 };
+
+export const vtuPassApi = axios.create({
+  baseURL: `https://vtpass.com/api`,
+  headers: {
+    "api-key": process.env.VTU_PASS_API_KEY,
+    "secret-key": process.env.VTU_PASS_SECRET_KEY,
+    "public-key": process.env.VTU_PASS_PUBLIC_KEY,
+  },
+});
 
 export const createOneTimeVirtualAccount = async (
   payload: createOneTimeVirtualAccountProps
@@ -80,7 +90,7 @@ export const createDedicatedVirtualAccount = async (
   try {
     const response = await axios.post<createDedicatedVirtualAccountResponse>(
       `https://api.billstack.co/v2/thirdparty/generateVirtualAccount/`,
-      payload,
+      { ...payload, reference: payload.reference.toString() },
       {
         headers: {
           Authorization: `Bearer ${process.env.BILL_STACK_SECRET_KEY}`,
@@ -89,12 +99,13 @@ export const createDedicatedVirtualAccount = async (
     );
 
     return response.data;
-  } catch (error) {
-    console.log(error);
+  } catch (error: any) {
+    console.log({ error: "We have an error" });
     return {
       status: false,
       message: (error as Error).message,
-    } as createDedicatedVirtualAccountResponse;
+      err: error?.response?.data,
+    };
   }
 };
 
@@ -375,90 +386,6 @@ export async function getTransactionByIdWithUserDetails(id: string) {
     console.error("Error fetching transaction with user details:", error);
     throw error;
   }
-}
-
-export async function processVirtualAccountForUser(
-  user: IUser,
-  preferableBank: availableBanks = "PALMPAY",
-  saveAccountDetails: boolean = true
-) {
-  const appConfigs = await App.findOne({});
-
-  let dedicatedAccountToOpenForUsers: availableBanks;
-
-  await connectToDatabase();
-
-  // Check if the account to create for users is not random then assign the available one else generate randomly
-
-  if (!preferableBank) {
-    if (
-      appConfigs?.bankAccountToCreateForUsers &&
-      appConfigs?.bankAccountToCreateForUsers !== "random"
-    ) {
-      dedicatedAccountToOpenForUsers = appConfigs?.bankAccountToCreateForUsers;
-    } else {
-      const banks: availableBanks[] = [
-        "9PSB",
-        "BANKLY",
-        "PALMPAY",
-        "PROVIDUS",
-        "SAFEHAVEN",
-      ];
-
-      dedicatedAccountToOpenForUsers = banks[2];
-    }
-  } else {
-    dedicatedAccountToOpenForUsers = preferableBank;
-  }
-
-  const newUser = user; //Assign this as newUser for clarity
-  const [firstName, lastName] = newUser?.fullName?.split(" "); //Split the user full name into firstName and lastName
-
-  // Create a virtual account for the user
-  const account = await createDedicatedVirtualAccount({
-    bank: dedicatedAccountToOpenForUsers,
-    email: newUser?.auth?.email,
-    firstName,
-    lastName,
-    phone: newUser.phoneNumber,
-    reference: user._id!,
-  });
-
-  // If the creation is not successful, notify the user about it
-  if (!account.status) {
-    throw new Error(
-      "Unable to create a dedicated account for you, please try again later"
-    );
-  }
-
-  // destructure the the virtual account response and rename some propertird
-  const { account: newVirtualAccount, ...rest } = account.data;
-
-  // Save dedicated account
-  const virtualAccount = newVirtualAccount[0];
-
-  // Prepare the payload for saving the user account
-  const virtualAccountPayload: dedicatedAccountNumber = {
-    accountDetails: {
-      accountName: virtualAccount.account_name,
-      accountNumber: virtualAccount.account_number,
-      accountRef: rest.reference,
-      bankCode: virtualAccount.bank_id,
-      bankName: virtualAccount.bank_name,
-      expirationDate: account.message,
-    },
-    hasDedicatedAccountNumber: true,
-    order_ref: newUser._id!,
-    user: newUser._id!,
-  };
-
-  // Instanciate the Account method
-  const _account = new Account(virtualAccountPayload);
-
-  // Save the virtual account the user create
-  await _account.save();
-
-  return virtualAccountPayload;
 }
 
 export async function sendEmail(
@@ -859,59 +786,64 @@ export class BuyVTU {
     }
   }
 
-  public async createTransaction(type: transactionType, userId: string) {
-    try {
-      if (!this.session) {
-        throw new Error("Session not started. Call startSession first.");
-      }
-
-      if (!this.status) return;
-
-      const meta = {
-        ...this.vendingResponse,
-        ...this.powerVendResponse,
-      };
-
-      const trxPayload: transaction = {
-        amount:
-          this.amount ||
-          this.vendingResponse?.totalAmount ||
-          this.powerVendResponse?.cost ||
-          0,
-        paymentMethod: "ownAccount",
-        accountId:
-          this.vendingResponse?.recipients ||
-          this.powerVendResponse?.recipients,
-        status: this.status ? "success" : "failed",
-        tx_ref: this.ref,
-        type,
-        user: userId,
-        meta,
-      };
-
-      const transaction = new Transaction(trxPayload);
-      await transaction.save({ session: this.session });
-
-      // Save the user contact to recently used contact
-      await addToRecentlyUsedContact(
-        userId,
-        trxPayload.type,
-        { ...meta, network: this.network },
-        this.session
-      );
-
-      this.transaction = transaction;
-      this.status = true;
-      return this;
-    } catch (error) {
-      this.status = false;
-      this.message =
-        error instanceof Error
-          ? error.message
-          : "TRANSACTION_CREATION_FAILED: unable to create transaction.";
-      return this;
-    }
-  }
+  //  public async createTransaction(
+  //    type: transactionType,
+  //    userId: string,
+  //    options?: Record<string, any>
+  //  ) {
+  //    try {
+  //      if (!this.session) {
+  //        throw new Error("Session not started. Call startSession first.");
+  //      }
+  //
+  //      if (!this.status) return;
+  //
+  //      const meta = {
+  //        ...this.vendingResponse,
+  //        ...this.powerVendResponse,
+  //        ...options,
+  //      };
+  //
+  //      const trxPayload: transaction = {
+  //        amount:
+  //          this.amount ||
+  //          this.vendingResponse?.totalAmount ||
+  //          this.powerVendResponse?.cost ||
+  //          0,
+  //        paymentMethod: "ownAccount",
+  //        accountId:
+  //          this.vendingResponse?.recipients ||
+  //          this.powerVendResponse?.recipients,
+  //        status: this.status ? "success" : "failed",
+  //        tx_ref: this.ref,
+  //        type,
+  //        user: userId,
+  //        meta,
+  //      };
+  //
+  //      const transaction = new Transaction(trxPayload);
+  //      await transaction.save({ session: this.session });
+  //
+  //      // Save the user contact to recently used contact
+  //      await addToRecentlyUsedContact(
+  //        userId,
+  //        trxPayload.type,
+  //        { ...meta, network: this.network },
+  //        this.session
+  //      );
+  //
+  //      this.transaction = transaction;
+  //      this.status = true;
+  //      return this;
+  //    } catch (error) {
+  //      this.status = false;
+  //      this.message =
+  //        error instanceof Error
+  //          ? error.message
+  //          : "TRANSACTION_CREATION_FAILED: unable to create transaction.";
+  //      return this;
+  //    }
+  //  }
 
   // Implementation for validator method
   public async validator(phoneNumber: string) {
@@ -938,7 +870,8 @@ export class BuyVTU {
     networkId: number,
     planId: number,
     phoneNumber: string,
-    amount: number
+    amount: number,
+    ref: string
   ) {
     try {
       interface IRes {
@@ -954,7 +887,7 @@ export class BuyVTU {
         network_id: networkId,
         plan_id: planId,
         phone: phoneNumber,
-        customer_reference: this.ref,
+        customer_reference: ref,
       };
 
       const res = await axios.post<IRes>(
@@ -962,6 +895,8 @@ export class BuyVTU {
         payload,
         { headers: { Authorization: `Bearer ${process.env.SME_PLUG_API_KEY}` } }
       );
+
+      console.log(res.data);
 
       this.vendingResponse = {
         recipientCount: 1,
@@ -979,11 +914,13 @@ export class BuyVTU {
         res.data.status &&
           this.vendingResponse.vendReport[phoneNumber] === "successful"
       );
-      this.message = !this.status ? "Data vending failed" : res.data.data.msg;
+      this.message = !this.status
+        ? res.data.data.msg || "Data vending failed"
+        : res.data.data.msg;
 
       return this;
     } catch (error: any) {
-      console.error(error.response);
+      console.log(error.response);
       this.status = false;
       this.message =
         error instanceof Error && error.message
@@ -1008,8 +945,6 @@ export class BuyVTU {
         bypass,
       };
 
-      console.log({ payload });
-
       const res = await axios.post<DataVendingResponse>(
         `https://a4bdata.com/api/data`,
         payload,
@@ -1019,6 +954,8 @@ export class BuyVTU {
           },
         }
       );
+
+      console.log(res.data);
 
       this.vendingResponse = {
         recipientCount: 1,
@@ -1049,6 +986,274 @@ export class BuyVTU {
         error instanceof Error && error.message
           ? error.message
           : "DATA_PURCHASE_FAILED: unable to process your request.";
+      return this;
+    }
+  }
+
+  public createRequestIdForVtuPass(suffix = "") {
+    const now = new Date();
+
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Africa/Lagos",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+
+    const dateParts: Record<string, any> = {};
+    for (const part of parts) {
+      if (part.type !== "literal") {
+        dateParts[part.type] = part.value;
+      }
+    }
+    const formattedDate =
+      dateParts.year +
+      dateParts.month +
+      dateParts.day +
+      dateParts.hour +
+      dateParts.minute;
+
+    const randomSuffix = suffix || Math.random().toString(36).substring(2, 14);
+    const requestId = formattedDate + randomSuffix;
+
+    return requestId;
+  }
+
+  public async buyDataFromVtuPass({
+    ..._payload
+  }: {
+    phone: number | string;
+    request_id?: string;
+    serviceID: "airtel-data" | "glo-data" | "etisalat-data";
+    variation_code: string;
+  }) {
+    try {
+      const payload = {
+        ..._payload,
+        request_id: _payload.request_id || this.createRequestIdForVtuPass(),
+        billersCode: _payload.phone,
+      };
+
+      const res = await vtuPassApi.post<VtuPassPayResponse>("/pay", payload);
+
+      console.log(res);
+
+      this.vendingResponse = {
+        recipientCount: 1,
+        recipients: String(_payload.phone),
+        cost: Number(res.data?.amount),
+        totalAmount: Number(res.data?.amount),
+        vendReport: {
+          [_payload.phone]: res.data.code === "000" ? "successful" : "failed",
+        },
+        vendStatus: null,
+        commissionEarned: 0,
+      };
+
+      this.status = res.data.code === "000";
+      this.message = !this.status
+        ? res.data.response_description
+        : `Your data purchase was successful and you will credited shortly`;
+
+      return this;
+    } catch (error: any) {
+      console.log(error);
+      this.status = false;
+      this.message =
+        error instanceof Error && error.message
+          ? error.message
+          : "DATA_PURCHASE_FAILED: unable to process your request.";
+      return this;
+    }
+  }
+
+  public async createPendingTransaction(
+    type: transactionType,
+    userId: string,
+    options?: Record<string, any>
+  ) {
+    try {
+      if (!this.session) {
+        throw new Error("Session not started. Call startSession first.");
+      }
+
+      const meta = {
+        ...options,
+        status: "pending", // Mark as pending initially
+      };
+
+      const trxPayload: transaction = {
+        amount: this.amount || 0,
+        paymentMethod: "ownAccount",
+        accountId: options?.customerPhone || "",
+        status: "pending",
+        tx_ref: options?.transactionRef || "",
+        type,
+        user: userId,
+        meta,
+      };
+
+      const transaction = new Transaction(trxPayload);
+      await transaction.save({ session: this.session });
+
+      this.transaction = transaction;
+      this.status = true;
+      return this;
+    } catch (error) {
+      this.status = false;
+      this.message =
+        error instanceof Error
+          ? error.message
+          : "TRANSACTION_CREATION_FAILED: unable to create transaction.";
+      return this;
+    }
+  }
+
+  public async updateTransactionStatus(success: boolean, message: string) {
+    try {
+      if (!this.transaction) {
+        throw new Error("No transaction to update");
+      }
+
+      const updateData = {
+        status: success ? "success" : "failed",
+        "meta.vendingResponse": this.vendingResponse,
+        "meta.vendingSuccess": success,
+        "meta.vendingMessage": message,
+        "meta.completedAt": new Date(),
+      };
+
+      await Transaction.findByIdAndUpdate(this.transaction._id, {
+        $set: updateData,
+      });
+
+      // Save the user contact to recently used contact only if successful
+      if (success && this.transaction) {
+        await addToRecentlyUsedContact(
+          this.transaction.user,
+          this.transaction.type,
+          { ...this.transaction.meta, network: this.network }
+        );
+      }
+
+      this.status = success;
+      this.message = message;
+      return this;
+    } catch (error) {
+      console.error("Error updating transaction status:", error);
+      return this;
+    }
+  }
+
+  public async createTransaction(
+    type: transactionType,
+    userId: string,
+    options?: Record<string, any>
+  ) {
+    try {
+      if (!this.session) {
+        throw new Error("Session not started. Call startSession first.");
+      }
+
+      if (!this.status) return;
+
+      const meta = {
+        ...this.vendingResponse,
+        ...this.powerVendResponse,
+        ...options,
+        status: this.status ? "success" : "failed",
+      };
+
+      const trxPayload: transaction = {
+        amount:
+          this.amount ||
+          this.vendingResponse?.totalAmount ||
+          this.powerVendResponse?.cost ||
+          0,
+        paymentMethod: "ownAccount",
+        accountId:
+          this.vendingResponse?.recipients ||
+          this.powerVendResponse?.recipients,
+        status: this.status ? "success" : "failed",
+        tx_ref: this.ref,
+        type,
+        user: userId,
+        meta,
+      };
+
+      const transaction = new Transaction(trxPayload);
+      await transaction.save({ session: this.session });
+
+      // Save the user contact to recently used contact
+      await addToRecentlyUsedContact(
+        userId,
+        trxPayload.type,
+        { ...meta, network: this.network, reciepients: options?.phoneNumber },
+        this.session
+      );
+
+      this.transaction = transaction;
+      this.status = true;
+      return this;
+    } catch (error) {
+      this.status = false;
+      this.message =
+        error instanceof Error
+          ? error.message
+          : "TRANSACTION_CREATION_FAILED: unable to create transaction.";
+      return this;
+    }
+  }
+
+  public async buyAirtimeFromVTPass(_payload: {
+    phone: string;
+    request_id: string;
+    amount: number;
+    network: availableNetworks;
+  }) {
+    try {
+      const serviceID: Record<availableNetworks, string | availableNetworks> = {
+        mtn: _payload.network,
+        glo: _payload.network,
+        airtel: _payload.network,
+        "9mobile": "etisalat",
+      };
+
+      const payload = {
+        ..._payload,
+        serviceID: serviceID[_payload.network],
+      };
+
+      const res = await vtuPassApi.post<VtuPassPayResponse>("/pay", payload);
+
+      this.vendingResponse = {
+        recipientCount: 1,
+        recipients: String(payload.phone),
+        cost: Number(res.data?.amount),
+        totalAmount: Number(res.data?.amount),
+        vendReport: {
+          [_payload.phone]: res.data.code === "000" ? "successful" : "failed",
+        },
+        vendStatus: null,
+        commissionEarned: 0,
+      };
+
+      this.status = res.data.code === "000";
+      this.message = !this.status
+        ? "Airtime vending failed"
+        : "Airtime purchase successful, you will be creditted soon";
+    } catch (error) {
+      console.log(error);
+
+      this.status = false;
+
+      this.message =
+        "Oops, there was an error when trying to purchase an airtime for you";
+
       return this;
     }
   }
@@ -1234,4 +1439,18 @@ export class ReferralProcessor {
       );
     }
   }
+}
+
+import { Types } from "mongoose";
+
+interface RefundResult {
+  success: boolean;
+  message: string;
+  transactionId?: string;
+  refundAmount?: number;
+}
+
+interface RefundError extends Error {
+  code?: string;
+  statusCode?: number;
 }

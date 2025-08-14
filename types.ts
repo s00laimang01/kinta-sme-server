@@ -765,3 +765,41 @@ export interface IReferralResponse extends IReferral {
 //      "lastName": "Sadiq",
 //      "email": "wanchiko20@gmail.com"
 //    }
+
+export interface VtuPassPayResponse {
+  code: string;
+  content: {
+    transactions: {
+      status: string;
+      product_name: string;
+      unique_element: string;
+      unit_price: string;
+      quantity: number;
+      service_verification: null;
+      channel: string;
+      commission: number;
+      total_amount: number;
+      discount: null;
+      type: string;
+      email: string;
+      phone: string;
+      name: null;
+      convinience_fee: number;
+      amount: string;
+      platform: string;
+      method: string;
+      transactionId: string;
+      commission_details: {
+        amount: number;
+        rate: string;
+        rate_type: string;
+        computation_type: string;
+      };
+    };
+  };
+  response_description: string;
+  requestId: string;
+  amount: number;
+  transaction_date: string;
+  purchased_code: string;
+}
