@@ -12,11 +12,6 @@ import { dataPlan, IBuyVtuNetworks } from "@/types";
 import { format } from "date-fns";
 import { Transaction } from "@/models/transactions"; // Add this import
 
-// Add a new schema for idempotency
-const dataRequestSchemaWithIdempotency = dataRequestSchema.extend({
-  idempotencyKey: z.string(),
-});
-
 export async function POST(request: Request) {
   const buyVtu = new BuyVTU();
   let isTransactionCommitted = false;
@@ -25,7 +20,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const validationResult = dataRequestSchemaWithIdempotency.safeParse(body);
+    const validationResult = dataRequestSchema.safeParse(body);
 
     if (!validationResult.success) {
       return NextResponse.json(
@@ -43,7 +38,6 @@ export async function POST(request: Request) {
       _id,
       phoneNumber,
       byPassValidator = false,
-      idempotencyKey,
     } = validationResult.data;
 
     // Get the email of the current authenticated user
@@ -66,30 +60,6 @@ export async function POST(request: Request) {
 
     if (!user) {
       throw new Error("USER_NOT_FOUND: please contact admin");
-    }
-
-    // Check for existing transaction with same idempotency key (if provided)
-    if (idempotencyKey) {
-      const existingTransaction = await Transaction.findOne({
-        user: user._id,
-        "meta.idempotencyKey": idempotencyKey,
-        type: "data",
-        createdAt: {
-          $gte: new Date(Date.now() - 10 * 60 * 1000), // Within last 10 minutes
-        },
-      });
-
-      if (existingTransaction) {
-        // Return the existing transaction result
-        return NextResponse.json(
-          httpStatusResponse(
-            200,
-            "Transaction already processed",
-            existingTransaction.meta
-          ),
-          { status: 200 }
-        );
-      }
     }
 
     // Verify the user transaction pin
@@ -140,7 +110,6 @@ export async function POST(request: Request) {
       completionTime: format(new Date(), "PPP"),
       customerPhone: phoneNumber,
       applicableCountry: "NG",
-      idempotencyKey: idempotencyKey,
       transactionRef: transactionRef,
       phoneNumber,
     });
