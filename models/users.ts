@@ -1,11 +1,6 @@
-import { processVirtualAccountForUser } from "@/lib/server-utils";
 import { IUser } from "@/types";
 import mongoose from "mongoose";
-import { Account } from "./account";
-import {
-  accountRequiresVerificationBeforeVirtualAccountActivation,
-  systemPasswordPolicy,
-} from "./app";
+import { systemPasswordPolicy } from "./app";
 import bcrypt from "bcryptjs";
 
 const UserSchema: mongoose.Schema<IUser> = new mongoose.Schema(
