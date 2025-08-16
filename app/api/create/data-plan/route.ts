@@ -53,10 +53,12 @@ export async function GET(request: NextRequest) {
       query["type"] = planType;
     }
 
-    const dataPlans = await DataPlan.find({ ...query }).sort({
+    const dataPlans = await DataPlan.find({
+      ...query,
+      $or: [{ removedFromList: false }, { removedFromList: undefined }],
+    }).sort({
       isPopular: -1,
-      updatedAt: 1,
-      //planId: 1,
+      amount: 1,
     });
 
     return NextResponse.json(
