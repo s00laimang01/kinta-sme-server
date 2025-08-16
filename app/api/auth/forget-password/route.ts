@@ -177,12 +177,7 @@ export async function POST(req: Request) {
         //`;
 
         // Send the email
-        await sendEmail(
-          [email],
-          emailHtml,
-          "Reset Your Password",
-          "s00laimang20@gmail.com"
-        );
+        await sendEmail([email], emailHtml, "Reset Your Password");
 
         return { success: true };
       } catch (error) {

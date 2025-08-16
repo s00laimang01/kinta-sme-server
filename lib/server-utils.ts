@@ -394,24 +394,46 @@ export async function sendEmail(
   subject: string,
   replyTo?: string
 ) {
-  let configOptions: SMTPTransport | SMTPTransport.Options | string = {
-    host: "smtp-relay.brevo.com",
-    port: 587,
-    ignoreTLS: true,
-    auth: {
-      user: process.env.HOST_EMAIL,
-      pass: process.env.HOST_EMAIL_PASSWORD,
-    },
-  };
+  //let configOptions: SMTPTransport | SMTPTransport.Options | string = {
+  //  host: "smtp-relay.brevo.com",
+  //  port: 465,
+  //  ignoreTLS: true,
+  //  secure: false,
+  //  auth: {
+  //    user: process.env.HOST_EMAIL,
+  //    pass: process.env.HOST_EMAIL_PASSWORD,
+  //  },
+  //};
 
-  const transporter = createTransport(configOptions);
-  await transporter.sendMail({
-    from: "kinta@data.com",
-    to: recipients,
-    html: emailTemplate,
-    replyTo,
-    subject: subject,
-  });
+  await axios.post(
+    "https://api.brevo.com/v3/smtp/email",
+    {
+      sender: {
+        name: "KINTA SME",
+        email: replyTo || "s00laimang00@gmail.com",
+      },
+      to: recipients.map((recipient) => ({ email: recipient })),
+
+      subject: subject,
+      htmlContent: emailTemplate,
+    },
+    {
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "api-key": process.env.BREVO_API_KEY,
+      },
+    }
+  );
+
+  //const transporter = createTransport(configOptions);
+  //await transporter.sendMail({
+  //  from: "kinta@data.com",
+  //  to: recipients,
+  //  html: emailTemplate,
+  //  replyTo,
+  //  subject: subject,
+  //});
 }
 
 //Class to purchase data, airtime, exam token, electricity
@@ -1233,13 +1255,13 @@ export class BuyVTU {
       this.vendingResponse = {
         recipientCount: 1,
         recipients: String(payload.phone),
-        cost: Number(res.data?.amount),
-        totalAmount: Number(res.data?.amount),
+        cost: Number(this.amount),
+        totalAmount: Number(this.amount),
         vendReport: {
           [_payload.phone]: res.data.code === "000" ? "successful" : "failed",
         },
         vendStatus: null,
-        commissionEarned: 0,
+        commissionEarned: this.amount! * 0.02,
       };
 
       this.status = res.data.code === "000";
