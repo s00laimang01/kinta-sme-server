@@ -143,7 +143,7 @@ export async function POST(request: Request) {
         const networdId: Record<IBuyVtuNetworks, string> = {
           Mtn: "1",
           Airtel: "airtel-data",
-          Glo: "glo-data",
+          Glo: dataPlan.type === "CHEAP" ? "glo-data" : "glo-sme-data",
           "9Mobile": "etisalat-data",
         };
 
