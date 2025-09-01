@@ -84,8 +84,8 @@ export async function POST(request: Request) {
     // Get the entire application configuration
     const app = await App.findOne({}).select("+buyVtu").session(buyVtu.session);
 
-    const disablePlan = app?.disabledPlans.find((plan) => {
-      const [ntwk = "", planType = ""] = plan.split("-");
+    const disablePlan = app?.disabledPlans?.find((plan) => {
+      const [ntwk = "", planType = ""] = plan?.split("-");
 
       return (
         ntwk.toLowerCase() === dataPlan?.network.toLowerCase() &&
