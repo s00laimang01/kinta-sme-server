@@ -145,7 +145,7 @@ export async function POST(request: Request) {
     let vendingMessage = "";
 
     try {
-      if (dataPlan.network === "Mtn" || dataPlan.provider === "smePlug") {
+      if (dataPlan.network.toLowerCase() === "mtn") {
         // Use abanty data sme
         const n: Record<string, any> = {
           mtn: "1",
@@ -165,7 +165,7 @@ export async function POST(request: Request) {
         const networdId: Record<IBuyVtuNetworks, string> = {
           Mtn: "1",
           Airtel: "airtel-data",
-          Glo: dataPlan.type === "CHEAP" ? "glo-data" : "glo-sme-data",
+          Glo: dataPlan.type === "SME" ? "glo-sme-data" : "glo-data",
           "9Mobile": "etisalat-data",
         };
 
@@ -173,7 +173,7 @@ export async function POST(request: Request) {
           phone: phoneNumber,
           request_id: transactionRef,
           serviceID: networdId[dataPlan?.network!] as "airtel-data",
-          variation_code: dataPlan?.planId + "",
+          variation_code: dataPlan?.planId as string,
         });
       }
 
