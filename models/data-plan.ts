@@ -26,10 +26,10 @@ const DataPlanSchema: mongoose.Schema<dataPlan> = new mongoose.Schema({
   type: {
     type: String,
     required: true,
-    enum: ["CHEAP", "SME"],
+    enum: ["CHEAP", "SME", "GIFTING"],
   },
   planId: {
-    type: Number,
+    type: mongoose.Schema.Types.Mixed,
     required: true,
   },
   provider: {

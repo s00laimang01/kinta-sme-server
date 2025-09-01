@@ -58,7 +58,7 @@ export interface dataPlan {
   type: planTypes;
   availability: string;
   isPopular?: boolean;
-  planId: number;
+  planId: any;
   provider: "buyVTU" | "smePlug";
   isDisabled?: boolean;
   removedFromList?: boolean;
