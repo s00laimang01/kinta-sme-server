@@ -72,11 +72,33 @@ export async function POST(request: Request) {
       throw new Error("PLAN_NOT_FOUND: we cannot find this plan");
     }
 
+    if (dataPlan.isDisabled || dataPlan.removedFromList) {
+      throw new Error(
+        "PLAN_DISABLED: this plan is disabled and cannot be purchased at the moment"
+      );
+    }
+
     // Start session after all validations
     await buyVtu.startSession();
 
     // Get the entire application configuration
     const app = await App.findOne({}).select("+buyVtu").session(buyVtu.session);
+
+    const disablePlan = app?.disabledPlans.find((plan) => {
+      const [ntwk = "", planType = ""] = plan.split("-");
+
+      return (
+        ntwk.toLowerCase() === dataPlan?.network.toLowerCase() &&
+        planType.toLowerCase() === dataPlan.type.toLowerCase()
+      );
+    });
+
+    if (!!disablePlan) {
+      return NextResponse.json(
+        httpStatusResponse(400, "Plan has been disabled"),
+        { status: 400 }
+      );
+    }
 
     await app?.systemIsunderMaintainance();
     await app?.isTransactionEnable("data");

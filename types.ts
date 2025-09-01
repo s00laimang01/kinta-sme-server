@@ -60,6 +60,8 @@ export interface dataPlan {
   isPopular?: boolean;
   planId: number;
   provider: "buyVTU" | "smePlug";
+  isDisabled?: boolean;
+  removedFromList?: boolean;
 }
 
 // STORES
@@ -269,6 +271,8 @@ export interface appProps extends Document {
     expiredAt: string;
     url: string;
   };
+
+  disabledPlans: string[];
 
   // Methods
   isTransactionEnable: (transactionType?: transactionType) => Promise<void>;
